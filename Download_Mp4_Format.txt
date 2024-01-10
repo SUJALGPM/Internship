@@ -1,0 +1,158 @@
+import React, { useRef, useState, useEffect } from 'react';
+import axios from 'axios';
+
+const VideoWatermark = () => {
+    const videoRef = useRef(null);
+    const [showWatermark, setShowWatermark] = useState(false);
+    const [watermarkImageBottomLeft, setWatermarkImageBottomLeft] = useState(null);
+    const [watermarkImageTopRight, setWatermarkImageTopRight] = useState(null);
+    const [binaryVideoData, setBinaryVideoData] = useState(null);
+
+    const handleImageChangeBottomLeft = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setWatermarkImageBottomLeft(reader.result);
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+
+    const handleImageChangeTopRight = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setWatermarkImageTopRight(reader.result);
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+
+    const addWatermark = () => {
+        setShowWatermark(true);
+    };
+
+    const downloadWithWatermark = async () => {
+        const video = videoRef.current;
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        const stream = canvas.captureStream();
+        const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
+        const chunks = [];
+
+        recorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+                chunks.push(event.data);
+            }
+        };
+
+        recorder.onstop = () => {
+            const blob = new Blob(chunks, { type: 'video/mp4' }); // Change the type to 'video/mp4' for MP4 format
+            const downloadLink = document.createElement('a');
+            downloadLink.href = URL.createObjectURL(blob);
+            downloadLink.download = 'video_with_watermark.mp4'; // Change the file extension to .mp4
+            downloadLink.click();
+            window.alert('Video with watermark has been downloaded!');
+        };
+
+        recorder.start();
+        video.play();
+
+        const drawFrame = () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            if (showWatermark && watermarkImageBottomLeft && watermarkImageTopRight) {
+                const watermark1 = new Image();
+                watermark1.src = watermarkImageBottomLeft;
+                const watermark2 = new Image();
+                watermark2.src = watermarkImageTopRight;
+
+                const watermarkWidth = 150; // Set the desired width for the circular watermark
+                const watermarkHeight = watermarkWidth;
+
+                // Watermark 1 at bottom-left
+                const watermark1Position = { x: 10, y: canvas.height - 10 - watermarkHeight };
+                // Watermark 2 at top-right
+                const watermark2Position = {
+                    x: canvas.width - 10 - watermarkWidth,
+                    y: 10,
+                };
+
+                drawWatermark(ctx, watermark1, watermark1Position, watermarkWidth, watermarkHeight);
+                drawWatermark(ctx, watermark2, watermark2Position, watermarkWidth, watermarkHeight);
+            }
+
+            if (!video.ended) {
+                requestAnimationFrame(drawFrame);
+            }
+        };
+
+        drawFrame();
+
+        setTimeout(() => {
+            recorder.stop();
+            video.pause();
+        }, video.duration * 1000);
+    };
+
+    const drawWatermark = (ctx, watermark, position, width, height) => {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(position.x + width / 2, position.y + height / 2, width / 2, 0, 2 * Math.PI);
+        ctx.closePath();
+        ctx.clip();
+        ctx.drawImage(watermark, position.x, position.y, width, height);
+        ctx.restore();
+    };
+
+    useEffect(() => {
+        axios.get("/api/auth/pullVideo", { responseType: 'arraybuffer' })
+            .then(res => {
+                const blob = new Blob([res.data], { type: 'video/mp4' });
+                setBinaryVideoData(blob);
+            })
+            .catch(err => console.log(err));
+    }, []);
+
+    useEffect(() => {
+        if (binaryVideoData) {
+            const videoURL = URL.createObjectURL(binaryVideoData);
+            const videoPlayer = videoRef.current;
+            if (videoPlayer) {
+                videoPlayer.src = videoURL;
+            }
+        }
+    }, [binaryVideoData]);
+
+    return (
+        <div style={{ position: 'relative' }}>
+            <video ref={videoRef} controls width="500">
+                <source src={binaryVideoData ? videoRef.current.src : ''} type="video/mp4" />
+                Your browser does not support the video tag.
+            </video>
+            {showWatermark && watermarkImageBottomLeft && watermarkImageTopRight && (
+                <div>
+                    {/* Watermark 1 at bottom-left */}
+                    <div style={{ position: 'absolute', bottom: '10px', left: '10px', borderRadius: '50%', overflow: 'hidden' }}>
+                        <img src={watermarkImageBottomLeft} alt="Watermark" style={{ maxWidth: '100px', borderRadius: '50%' }} />
+                    </div>
+                    {/* Watermark 2 at top-right */}
+                    <div style={{ position: 'absolute', top: '10px', right: '10px', borderRadius: '50%', overflow: 'hidden' }}>
+                        <img src={watermarkImageTopRight} alt="Watermark" style={{ maxWidth: '100px', borderRadius: '50%' }} />
+                    </div>
+                </div>
+            )}
+            <input type="file" accept="image/*" onChange={handleImageChangeBottomLeft} />
+            <input type="file" accept="image/*" onChange={handleImageChangeTopRight} />
+            <button onClick={addWatermark}>Add Watermark</button>
+            <button onClick={downloadWithWatermark}>Download with Watermark</button><br />
+        </div>
+    );
+};
+
+export default VideoWatermark;
