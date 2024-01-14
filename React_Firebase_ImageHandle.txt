@@ -1,0 +1,60 @@
+import React, { useEffect, useState } from 'react'
+import { getDownloadURL, listAll, ref, uploadBytes } from 'firebase/storage';
+import { imgDB } from './ImageStorage';
+import { v4 } from 'uuid';
+
+const Template1 = () => {
+
+    //Store the image.....
+    const [image, setImage] = useState('');
+
+    // Store the fetched images
+    const [imgUrl, setImgUrl] = useState([]);
+
+    const [uploadedImage, setUploadedImage] = useState(null);
+
+    //Upload the image to firebase...
+    const handleUpload = async(e) => {
+        const imgRef = ref(imgDB, `files/${v4()}`);
+        uploadBytes(imgRef, image);
+        window.alert("Image Uploaded Successfully...");
+    }
+
+    const Fetched = async () => {
+        const data = await listAll(ref(imgDB, "files"));
+        data.items.forEach(val => {
+            getDownloadURL(val).then(url => {
+                setImgUrl(res => [...res, url]);
+            })
+        })
+        if (!data) {
+            console.log("Images not fetched..!");
+            window.alert("Images not fetched..!");
+        }
+        else {
+            console.log("Images fetched successfully..");
+            window.alert("Images fetched successfully..");
+        }
+    }
+
+    //Fetched and display the images...
+    useEffect(() => {
+        Fetched();
+    }, []);
+
+    return (
+        <div>
+            <input type='file' onChange={(e) => setImage(e.target.files[0])} />
+            <button onClick={handleUpload}>Upload</button>
+            <br />
+            {
+                imgUrl.map(imgData => <div>
+                    <img src={imgData} height="200px" width="200px" />
+                </div>)
+            }
+        </div>
+    )
+}
+
+export default Template1;
+
