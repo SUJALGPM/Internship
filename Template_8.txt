@@ -1,0 +1,211 @@
+//Video_Edit_with_Square_Haxagon_zoomOut_Haxagon_with_audio
+
+import React, { useRef, useState, useEffect } from 'react';
+import videoSource from "../data/tamp1.mp4";
+import axios from 'axios';
+
+const VideoWatermark = () => {
+  const videoRef = useRef(null);
+  const [showWatermark, setShowWatermark] = useState(false);
+  const [watermarkImage, setWatermarkImage] = useState(null);
+  const [userText, setUserText] = useState("");
+  const [fetchVideo, setFetchVideo] = useState("");
+
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setWatermarkImage(reader.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // const handleTextChange = (e) => {
+  //   setUserText(e.target.value);
+  // };
+
+  const addWatermark = () => {
+    setShowWatermark(true);
+  };
+
+  const downloadWithWatermark = async () => {
+    const video = videoRef.current;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+
+    const audioCtx = new AudioContext();
+    const dest = audioCtx.createMediaStreamDestination();
+
+    const videoStream = canvas.captureStream();
+    const audioStream = dest.stream;
+
+    const recorder = new MediaRecorder(new MediaStream([videoStream.getVideoTracks()[0], audioStream.getAudioTracks()[0]]), { mimeType: 'video/webm;codecs=vp9,opus' });
+    const chunks = [];
+
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        chunks.push(event.data);
+      }
+    };
+
+    recorder.onstop = () => {
+      const blob = new Blob(chunks, { type: 'video/webm' });
+
+      const downloadLink = document.createElement('a');
+      downloadLink.href = URL.createObjectURL(blob);
+      downloadLink.download = 'video_with_watermark.mkv';
+      downloadLink.click();
+    };
+
+    recorder.start();
+
+    video.play();
+
+    const drawFrame = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      if (showWatermark && watermarkImage) {
+        const watermark = new Image();
+        watermark.src = watermarkImage;
+
+        const watermarkMaxWidth = canvas.width;
+        const watermarkMaxHeight = canvas.height;
+
+        const elapsedTime = video.currentTime;
+
+        let watermarkWidth, watermarkHeight, watermarkPosition, shape;
+
+        if (elapsedTime <= 10) {
+          // Display full-screen square watermark initially
+          const progress = elapsedTime / 10;
+          watermarkWidth = watermarkMaxWidth - progress * (watermarkMaxWidth - 50);
+          watermarkHeight = watermarkMaxHeight - progress * (watermarkMaxHeight - 50);
+          watermarkPosition = {
+            x: (canvas.width - watermarkWidth) / 2,
+            y: (canvas.height - watermarkHeight) / 2,
+          };
+          shape = 'square';
+        } else if (elapsedTime <= 20) {
+          // Transition from square to circle
+          const progress = (elapsedTime - 10) / 10;
+          const hexagonRadius = Math.min(watermarkMaxWidth, watermarkMaxHeight) / 2;
+          watermarkWidth = 50 + progress * (watermarkMaxWidth - 50);
+          watermarkHeight = 50 + progress * (watermarkMaxHeight - 50);
+          watermarkPosition = {
+            x: (canvas.width - watermarkWidth) / 2,
+            y: (canvas.height - watermarkHeight) / 2,
+          };
+          shape = 'hexagon';
+        } else {
+          // Display small hexagonal watermark at bottom-left
+          const progress = (elapsedTime - 20) / (video.duration - 20);
+          watermarkWidth = 50;
+          watermarkHeight = 50;
+          watermarkPosition = {
+            x: 10,
+            y: canvas.height - 10 - watermarkHeight - progress * (canvas.height - watermarkHeight - 20),
+          };
+          shape = 'hexagon';
+        }
+
+        ctx.save();
+
+        const zoomFactor = Math.min(watermarkWidth / 50, 1); // Calculate the zoom factor
+
+        // if (shape === 'circle' && zoomFactor > 1) {
+        //   // If zoomed in, switch to hexagon format
+        //   shape = 'hexagon';
+        // }
+
+        // if (shape === 'circle') {
+        //   // Create a circular clipping path
+        //   ctx.beginPath();
+        //   ctx.arc(watermarkPosition.x + watermarkWidth / 2, watermarkPosition.y + watermarkHeight / 2, watermarkWidth / 2, 0, 2 * Math.PI);
+        //   ctx.closePath();
+        //   ctx.clip();
+        if (shape === 'hexagon' && zoomFactor > 1) {
+
+          // Create a hexagonal clipping path
+          const hexagonRadius = watermarkWidth / 2;
+          const hexagonX = watermarkPosition.x + hexagonRadius;
+          const hexagonY = watermarkPosition.y + hexagonRadius;
+          ctx.beginPath();
+          ctx.moveTo(hexagonX + hexagonRadius * Math.cos(0), hexagonY + hexagonRadius * Math.sin(0));
+          for (let i = 1; i <= 6; i++) {
+            ctx.lineTo(hexagonX + hexagonRadius * Math.cos((i * 2 * Math.PI) / 6), hexagonY + hexagonRadius * Math.sin((i * 2 * Math.PI) / 6));
+          }
+          ctx.closePath();
+          ctx.clip();
+        } else if (shape === 'hexagon') {
+
+          // Create a hexagonal clipping path
+          const hexagonRadius = watermarkWidth / 2;
+          const hexagonX = watermarkPosition.x + hexagonRadius;
+          const hexagonY = watermarkPosition.y + hexagonRadius;
+          ctx.beginPath();
+          ctx.moveTo(hexagonX + hexagonRadius * Math.cos(0), hexagonY + hexagonRadius * Math.sin(0));
+          for (let i = 1; i <= 6; i++) {
+            ctx.lineTo(hexagonX + hexagonRadius * Math.cos((i * 2 * Math.PI) / 6), hexagonY + hexagonRadius * Math.sin((i * 2 * Math.PI) / 6));
+          }
+          ctx.closePath();
+          ctx.clip();
+        }
+
+        ctx.drawImage(watermark, watermarkPosition.x, watermarkPosition.y, watermarkWidth, watermarkHeight);
+
+        ctx.restore();
+      }
+
+      if (!video.ended) {
+        requestAnimationFrame(drawFrame);
+      }
+    };
+
+    drawFrame();
+
+    // Connect the audio context to the destination
+    audioCtx.resume().then(() => {
+      const audioSource = audioCtx.createMediaElementSource(video);
+      audioSource.connect(dest);
+    });
+
+    setTimeout(() => {
+      recorder.stop();
+      video.pause();
+    }, video.duration * 1000);
+  };
+
+  useEffect(() => {
+    axios.get("/api/auth/pullVideo")
+      .then(res => {
+        console.log(res.data);
+        setFetchVideo(res.data);
+      })
+      .catch(err => console.log(err))
+  }, []);
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <video ref={videoRef} controls width="500">
+        <source src={videoSource} type="video/mp4" />
+        Your browser does not support the video tag.
+      </video>
+      {showWatermark && watermarkImage && (
+        <div style={{ position: 'absolute', bottom: '10px', left: '10px', borderRadius: '50%', overflow: 'hidden' }}>
+          <img src={watermarkImage} alt="Watermark" style={{ maxWidth: '100px', borderRadius: '50%' }} />
+        </div>
+      )}
+      <input type="file" accept="image/*" onChange={handleImageChange} />
+      {/* <input type="text" placeholder="Enter text" value={userText} onChange={handleTextChange} style={{ margin: '10px' }} /> */}
+      <button onClick={addWatermark}>Add Watermark</button>
+      <button onClick={downloadWithWatermark}>Download with Watermark</button>
+    </div>
+  );
+};
+
+export default VideoWatermark;

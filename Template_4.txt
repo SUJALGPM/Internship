@@ -1,0 +1,177 @@
+// 4_photos_with_audio.....
+
+import React, { useRef, useState, useEffect } from 'react';
+import axios from 'axios';
+
+const VideoWatermark = () => {
+  const videoRef = useRef(null);
+  const [showWatermark, setShowWatermark] = useState(false);
+  const [watermarkImages, setWatermarkImages] = useState(Array(4).fill(null));
+  const [binaryVideoData, setBinaryVideoData] = useState(null);
+
+  const handleImageChange = (e, index) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const newWatermarkImages = [...watermarkImages];
+        newWatermarkImages[index] = reader.result;
+        setWatermarkImages(newWatermarkImages);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const addWatermark = () => {
+    setShowWatermark(true);
+  };
+
+  const drawWatermarks = (ctx, watermarkImages, canvas) => {
+    watermarkImages.forEach((watermark, index) => {
+      if (watermark) {
+        const watermarkImage = new Image();
+        watermarkImage.src = watermark;
+
+        const watermarkWidth = 150; // Set the desired width for the circular watermark
+        const watermarkHeight = watermarkWidth;
+
+        const watermarkPosition = {
+          x: 10,
+          y: (index * (canvas.height - 10 - watermarkHeight)) / 3, // Adjust the vertical position
+        };
+
+        drawWatermark(ctx, watermarkImage, watermarkPosition, watermarkWidth, watermarkHeight);
+      }
+    });
+  };
+
+  const downloadWithWatermark = async () => {
+    const video = videoRef.current;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+
+    const audioCtx = new AudioContext();
+    const dest = audioCtx.createMediaStreamDestination();
+
+    const videoStream = canvas.captureStream();
+    const audioStream = dest.stream;
+
+    const recorder = new MediaRecorder(new MediaStream([videoStream.getVideoTracks()[0], audioStream.getAudioTracks()[0]]), { mimeType: 'video/webm;codecs=vp9,opus' });
+    const chunks = [];
+
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        chunks.push(event.data);
+      }
+    };
+
+    recorder.onstop = () => {
+      const blob = new Blob(chunks, { type: 'video/mp4' });
+      const downloadLink = document.createElement('a');
+      downloadLink.href = URL.createObjectURL(blob);
+      downloadLink.download = 'video_with_watermark.mp4';
+      downloadLink.click();
+      window.alert('Video with watermark has been downloaded!');
+    };
+
+    recorder.start();
+    video.play();
+
+    const drawFrame = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      if (showWatermark && watermarkImages.some((image) => image !== null)) {
+        drawWatermarks(ctx, watermarkImages, canvas);
+      }
+
+      if (!video.ended) {
+        requestAnimationFrame(drawFrame);
+      }
+    };
+
+    drawFrame();
+
+    // Connect the audio context to the destination
+    audioCtx.resume().then(() => {
+      const audioSource = audioCtx.createMediaElementSource(video);
+      audioSource.connect(dest);
+    });
+
+    setTimeout(() => {
+      recorder.stop();
+      video.pause();
+    }, video.duration * 1000);
+  };
+
+  const drawWatermark = (ctx, watermark, position, width, height) => {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(position.x + width / 2, position.y + height / 2, width / 2, 0, 2 * Math.PI);
+    ctx.closePath();
+    ctx.clip();
+    ctx.drawImage(watermark, position.x, position.y, width, height);
+    ctx.restore();
+  };
+
+  useEffect(() => {
+    axios.get("/api/auth/pullVideo", { responseType: 'arraybuffer' })
+      .then(res => {
+        const blob = new Blob([res.data], { type: 'video/mp4' });
+        setBinaryVideoData(blob);
+      })
+      .catch(err => console.log(err));
+  }, []);
+
+  useEffect(() => {
+    if (binaryVideoData) {
+      const videoURL = URL.createObjectURL(binaryVideoData);
+      const videoPlayer = videoRef.current;
+      if (videoPlayer) {
+        videoPlayer.src = videoURL;
+      }
+    }
+  }, [binaryVideoData]);
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <video ref={videoRef} controls width="500">
+        <source src={binaryVideoData ? videoRef.current.src : ''} type="video/mp4" />
+        Your browser does not support the video tag.
+      </video>
+
+      {showWatermark && watermarkImages.some((image) => image !== null) && (
+        <div>
+          {watermarkImages.map((image, index) => (
+            <div
+              key={index}
+              style={{
+                position: 'absolute',
+                bottom: `${10 + (index * 110)}px`,
+                left: '10px',
+                borderRadius: '50%',
+                overflow: 'hidden',
+              }}
+            >
+              <img src={image} alt={`Watermark ${index + 1}`} style={{ maxWidth: '100px', borderRadius: '50%' }} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {[0, 1, 2, 3].map((index) => (
+        <div key={index}>
+          <input type="file" accept="image/*" onChange={(e) => handleImageChange(e, index)} />
+        </div>
+      ))}
+
+      <button onClick={addWatermark}>Add Watermark</button>
+      <button onClick={downloadWithWatermark}>Download with Watermark</button>
+      <br />
+    </div>
+  );
+};
+
+export default VideoWatermark;
