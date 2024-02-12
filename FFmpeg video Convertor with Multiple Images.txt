@@ -1,0 +1,594 @@
+//This is my client side code........
+
+import React, { useRef, useState, useEffect } from "react";
+// import videoSource from "../data/tamp1.mp4";
+import axios from "axios";
+import { useParams, NavLink } from "react-router-dom";
+
+// import UserSidebar from "./Sidebar/Sidebar";
+// import { IoMdArrowRoundBack } from "react-icons/io";
+// import CropFun from "./Crop/CropFun";
+// import Modal from "react-modal";
+
+const Multiple = () => {
+    const videoRef = useRef(null);
+    const audioCtxRef = useRef(null);
+    const audioSourceRef = useRef(null);
+    const { videoname, MRID, name } = useParams();
+    // console.log(videoname);
+    const [showWatermark, setShowWatermark] = useState(false);
+    const [watermarkImage, setWatermarkImage] = useState(null);
+    const [binaryVideoData, setBinaryVideoData] = useState(null);
+    const [inputText, setInputText] = useState([]);
+    const [watermarkImages, setWatermarkImages] = useState([]);
+    const [videoFilenames, setVideoFilenames] = useState([]);
+    const [inputTextArray, setInputTextArray] = useState([]);
+    const [selectedImageNames, setSelectedImageNames] = useState([]);
+    const [modalIsOpen, setModalIsOpen] = useState(false);
+
+    const openModal = () => {
+        setModalIsOpen(true);
+    };
+
+    const closeModal = () => {
+        setModalIsOpen(false);
+    };
+
+    const handleInputTxt = (e, index) => {
+        const newTextArray = [...inputTextArray];
+        newTextArray[index] = e.target.value;
+        setInputTextArray(newTextArray);
+    };
+
+    const handleImageChange = (e) => {
+        const files = e.target.files;
+
+        const names = Array.from(files).map((file) => file.name);
+
+        // Update selectedImageNames state
+        setSelectedImageNames(names);
+
+        console.log(files);
+        if (files && files.length > 0) {
+            const newImages = Array.from(files).map((file) => {
+                return URL.createObjectURL(file);
+            });
+
+            console.log(newImages);
+
+            // Update the watermarkImages state with the new array of images
+            setWatermarkImages((prevImages) => [...prevImages, ...newImages]);
+        }
+    };
+
+    const addWatermark = () => {
+        setShowWatermark(true);
+    };
+
+
+    const processSelectedImages = async (selectedImages, inputTextArray) => {
+        if (selectedImages.length === 0) {
+            return;
+        }
+
+        const image = selectedImages[0];
+        const inputText = inputTextArray[0];
+        console.log(inputText);
+
+        // Set the watermarkImage state for the current image
+        setWatermarkImage(image);
+        setInputText(inputText);
+
+        // Wait for the state to be updated
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        // Process and generate video for the current image
+        await downloadWithWatermark(image, inputText);
+
+        // Reset watermarkImage state for the next iteration
+        setWatermarkImage(null);
+        setInputTextArray([]);
+
+        // Process the rest of the images and input texts recursively
+        await processSelectedImages(
+            selectedImages.slice(1),
+            inputTextArray.slice(1)
+        );
+    };
+
+    // Modify your onClick handler for Download Video button to use processSelectedImages
+    const handleDownloadClick = async () => {
+        if (watermarkImages.length > 0) {
+            // Call the function to process selected images
+            await processSelectedImages(watermarkImages, inputTextArray);
+        } else {
+            // Handle case when no images are selected
+            alert("No images selected.");
+        }
+    };
+
+    const downloadWithWatermark = async (watermarkImage, inputText) => {
+        console.log("water", watermarkImage);
+        console.log("inputtextttt", inputText);
+        // handleUserData();
+        const video = videoRef.current;
+        const canvas = document.createElement("canvas");
+        canvas.width = video.videoWidth / 2;
+        canvas.height = video.videoHeight / 2;
+        const ctx = canvas.getContext("2d");
+
+        // Check if the AudioContext is already created
+        const audioCtx = audioCtxRef.current || new AudioContext();
+        audioCtxRef.current = audioCtx;
+        //
+        // Check if the HTMLMediaElementSourceNode is already created
+        let audioSource = audioSourceRef.current;
+        if (!audioSource) {
+            audioSource = audioCtx.createMediaElementSource(video);
+            audioSourceRef.current = audioSource;
+        }
+
+        const dest = audioCtx.createMediaStreamDestination();
+        const videoStream = canvas.captureStream();
+        const audioStream = dest.stream;
+
+        const combinedStream = new MediaStream([
+            videoStream.getVideoTracks()[0],
+            audioStream.getAudioTracks()[0],
+        ]);
+
+        const mediaRecorder = new MediaRecorder(combinedStream, {
+            mimeType: "video/webm",
+        });
+
+        const chunks = [];
+
+        mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+                chunks.push(event.data);
+            }
+        };
+
+        mediaRecorder.onstop = async () => {
+            const blob = new Blob(chunks, { type: 'video/webm' });
+            const formData = new FormData();
+            formData.append('video', blob, `${inputText}.webm`);
+            console.log(formData.get('video'));
+
+            try {
+                const response = await axios.post('/api/auth/videoCon', formData, {
+                    headers: {
+                        'Content-Type': 'multipart/form-data'
+                    },
+                    // Ensure response type is set to arraybuffer to receive binary data
+                    responseType: 'arraybuffer'
+                });
+
+                // Create a Blob object from the video data received in the response
+                const videoBlob = new Blob([response.data], { type: 'video/mp4' });
+
+                // Create a URL for the video blob
+                const videoBlobUrl = URL.createObjectURL(videoBlob);
+
+                // Create a link element
+                const downloadLink = document.createElement('a');
+                downloadLink.href = videoBlobUrl;
+                downloadLink.download = `${inputText}.mp4`;
+                downloadLink.style.display = 'none';
+
+                // Append the link to the document body
+                document.body.appendChild(downloadLink);
+
+                // Simulate a click event to trigger the download
+                downloadLink.click();
+
+                // Remove the download link from the document body after download
+                document.body.removeChild(downloadLink);
+
+                console.log('Video successfully sent to server for download:', response.data);
+            } catch (error) {
+                console.error('Error while sending video to server:', error);
+            }
+        };
+
+        mediaRecorder.start();
+
+        //
+        video.play();
+
+        //For smooth transition...
+        const easeInOutQuad = (t) => {
+            return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+        };
+
+        const drawFrame = () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            if (showWatermark && watermarkImage) {
+                const watermark = new Image();
+                watermark.src = watermarkImage;
+
+                const watermarkMaxWidth = canvas.width;
+                const watermarkMaxHeight = canvas.height;
+
+                const elapsedTime = video.currentTime;
+
+                let watermarkWidth, watermarkHeight, watermarkPosition;
+
+                let heldSize = { width: 50, height: 50 }; // Default size for initialization
+                let heldPosition = { x: 0, y: 0 }; // Default position for initialization
+
+                // Define pulse parameters
+                const pulseFrequency = 8;
+                const pulseAmplitude = 3;
+
+                if (elapsedTime <= 10) {
+                    const progress = elapsedTime / 2;
+
+                    // Minimum size to avoid reaching zero
+                    const minSize = 292;
+
+                    // Calculate size with a minimum size
+                    watermarkWidth = Math.max(
+                        minSize,
+                        watermarkMaxWidth - progress * (watermarkMaxWidth - minSize)
+                    );
+                    watermarkHeight = Math.max(
+                        minSize,
+                        watermarkMaxHeight - progress * (watermarkMaxHeight - minSize)
+                    );
+
+                    // Add pulsing effect
+                    const pulseSize =
+                        Math.sin(elapsedTime * pulseFrequency) * pulseAmplitude;
+                    watermarkWidth += pulseSize;
+                    watermarkHeight += pulseSize;
+
+                    watermarkPosition = {
+                        x: 60, // Adjusted to stay at the middle-left side
+                        y: (canvas.height - watermarkHeight) / 2,
+                    };
+
+                    //Store the calculated size....
+                    heldSize = { width: watermarkWidth, height: watermarkHeight };
+                    heldPosition = { x: watermarkPosition.x, y: watermarkPosition.y };
+                } else if (elapsedTime <= 28) {
+                    if (elapsedTime <= 10 + 1) {
+                        // During the first 2 seconds of the transition period (10 seconds to 12 seconds), calculate the eased progress
+                        const progress = (elapsedTime - 10) / 1;
+
+                        // Apply easing function to create a smooth motion
+                        const easedProgress = easeInOutQuad(progress);
+
+                        // Calculate the position based on the easing progress
+                        heldPosition = {
+                            x:
+                                canvas.width / 4 + 5 + easedProgress * (canvas.width / 2 - 120),
+                            y: (canvas.height - heldSize.height * 6) / 2,
+                        };
+                    } else {
+                        // After the first 2 seconds, stay at middle-right side without further easing
+                        heldPosition = {
+                            x: canvas.width / 2 + 120, // Middle-right side
+                            y: (canvas.height - heldSize.height * 6) / 2,
+                        };
+                    }
+
+                    watermarkPosition = heldPosition;
+
+                    // Adjust the watermark size after the transition
+                    watermarkWidth = heldSize.width * 6;
+                    watermarkHeight = heldSize.height * 6;
+
+                    // Add pulsing effect
+                    const pulseSize =
+                        Math.sin(elapsedTime * pulseFrequency) * pulseAmplitude;
+                    watermarkWidth += pulseSize;
+                    watermarkHeight += pulseSize;
+                } else if (elapsedTime > 28) {
+                    const transitionDuration = 1; // Duration of the transition to the left side
+
+                    if (elapsedTime <= 28 + transitionDuration) {
+                        // During the transition period (from 27 seconds to 29 seconds), calculate the eased progress
+                        const progress = (elapsedTime - 28) / transitionDuration;
+
+                        // Apply easing function to create a smooth motion
+                        const easedProgress = easeInOutQuad(progress);
+
+                        // Calculate the position based on the easing progress to move to the left side
+                        heldPosition = {
+                            x:
+                                canvas.width / 2 + 120 - easedProgress * (canvas.width / 2 - 5),
+                            y: (canvas.height - heldSize.height * 6) / 2,
+                        };
+                    } else {
+                        // After the transition, stay at the middle-left side without further easing
+                        heldPosition = {
+                            x: 55, // Middle-left side
+                            y: (canvas.height - heldSize.height * 6) / 2,
+                        };
+                    }
+
+                    watermarkPosition = heldPosition;
+
+                    // Adjust the watermark size after the transition
+                    watermarkWidth = heldSize.width * 6;
+                    watermarkHeight = heldSize.height * 6;
+
+                    // Add pulsing effect
+                    const pulseSize =
+                        Math.sin(elapsedTime * pulseFrequency) * pulseAmplitude;
+                    watermarkWidth += pulseSize;
+                    watermarkHeight += pulseSize;
+                }
+
+                // Draw the watermark
+                ctx.drawImage(
+                    watermark,
+                    watermarkPosition.x,
+                    watermarkPosition.y,
+                    watermarkWidth,
+                    watermarkHeight
+                );
+
+                // Add static text below the watermark
+                const staticText = "Dr." + inputText;
+                const topMargin = 32;
+                const textPosition = {
+                    x:
+                        watermarkPosition.x +
+                        (watermarkWidth - ctx.measureText(staticText).width) / 2,
+                    y: watermarkPosition.y + watermarkHeight + topMargin, // Adjust the vertical position as needed
+                };
+
+                ctx.fillStyle = "black";
+                ctx.font = "bold 37px 'Poppins', sans-serif";
+                ctx.fillText(staticText, textPosition.x, textPosition.y);
+            }
+
+            if (!video.ended) {
+                setTimeout(() => {
+                    requestAnimationFrame(drawFrame);
+                }, 1000 / 15); // Adjust the frame rate (15 frames per second in this example)
+            }
+        };
+
+        // Start drawing frames
+        drawFrame();
+
+        // Connect the audio context to the destination
+        audioCtx.resume().then(() => {
+            audioSource.connect(dest);
+        });
+
+        setTimeout(() => {
+            mediaRecorder.stop();
+            video.pause();
+        }, video.duration * 1000);
+    };
+
+    // Fetch the binary video data from the server
+    useEffect(() => {
+        axios
+            .get(`/api/auth/pullVideo`, {
+                responseType: "arraybuffer",
+            })
+            .then((res) => {
+                // Create a Blob from the binary data
+                const blob = new Blob([res.data], { type: "video/mp4" });
+                setBinaryVideoData(blob);
+            })
+            .catch((err) => console.log(err));
+    }, []);
+
+    // Update the video source when binary data changes
+    useEffect(() => {
+        if (binaryVideoData) {
+            // Create a URL for the Blob
+            const videoURL = URL.createObjectURL(binaryVideoData);
+
+            // Set the video source to the created URL
+            const videoPlayer = videoRef.current;
+            if (videoPlayer) {
+                videoPlayer.src = videoURL;
+            }
+        }
+    }, [binaryVideoData]);
+
+    return (
+        <>
+            {/* <UserSidebar /> */}
+            <div className="flex  relative top-[-24px]">
+                {/* <NavLink className="p-5 flex relative left-[3px] " to={/home/${MRID}}>
+            <div
+                style={{ backgroundColor: "#F58420", color: "white" }}
+                className="p-[12px] drop-shadow-lg    h-10 w-10   rounded-full "
+            >
+                <IoMdArrowRoundBack />
+            </div>
+        </NavLink> */}
+                <div className="text-black text-[20px] font-bold relative left-[-3px] top-[53px]  ">
+                    <p>Video Card</p>
+                </div>
+            </div >
+            <div className="font-bold text-[9px] top-[-49px] relative left-[83px] w-[195px] text-[rgba(158,156,158,1)] ">
+                <p>Please fill the details on your video templates.</p>
+            </div>
+            <div className="w-screen h-auto  mx-auto p-8 text-center flex justify-center items-center">
+                <div className=" w-[94vw] border-4 ">
+
+                    <video
+                        ref={videoRef}
+                        controls
+                        controlsList="nodownload"
+                        className="rounded mb-8 w-auto"
+                    >
+                        <source
+                            src={binaryVideoData ? videoRef.current.src : ""}
+                            type="video/mp4"
+                        />
+                        Your browser does not support the video tag.
+                    </video>
+
+                    <div className="w-[300px]  relative left-[20px]">
+                        {showWatermark && watermarkImage && (
+                            <div className="absolute top-[174px] left-[41px] rounded-full overflow-hidden">
+                                <img
+                                    src={watermarkImage}
+                                    alt="Watermark"
+                                    className="max-w-20 rounded-full"
+                                />
+                            </div>
+                        )}
+
+                        <div class="px-4 py-6">
+                            <div
+                                id="image-preview"
+                                class="max-w-sm p-6 mb-4 bg-gray-100 border-dashed border-2 border-gray-400 rounded-lg items-center mx-auto text-center cursor-pointer"
+                            >
+                                <input
+                                    id="upload"
+                                    type="file"
+                                    class="hidden"
+                                    multiple
+                                    accept="image/*"
+                                    onChange={handleImageChange}
+                                />
+                                <label for="upload" class="cursor-pointer">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke-width="1.5"
+                                        stroke="currentColor"
+                                        class="w-8 h-8 text-gray-700 mx-auto mb-4"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"
+                                        />
+                                    </svg>
+                                    <h5 class="mb-2 text-xl font-bold tracking-tight text-gray-700">
+                                        Select picture
+                                    </h5>
+                                    {/* <p class="font-normal text-sm text-gray-400 md:px-6">Choose photo size should be less than <b class="text-gray-600">2mb</b></p> */}
+                                    <p class="font-normal text-sm text-gray-400 md:px-6">
+                                        {" "}
+                                        <b class="text-gray-600">JPG, PNG</b> format.
+                                    </p>
+                                    <span
+                                        id="filename"
+                                        class="text-gray-500 bg-gray-200 z-50"
+                                    ></span>
+                                </label>
+                            </div>
+                        </div>
+
+                        {watermarkImages.map((image, index) => (
+                            <div key={index} className="mb-4">
+                                { }
+                                <label
+                                    htmlFor={`inputText${index}`}
+                                    className="relative left-[-92px] bottom-[10px] text-[12px]"
+                                >
+                                    Doctor Name*
+                                </label>
+                                <div className="">
+                                    <input
+                                        className="w-[98%] h-[40px] border-2 rounded-full"
+                                        type="text"
+                                        id={`inputText${index}`}
+                                        name={`inputText${index}`}
+                                        value={inputTextArray[index] || ""}
+                                        placeholder="Doctor Name"
+                                        onChange={(e) => handleInputTxt(e, index)}
+                                        required
+                                    />
+                                    <span className="text-sm">{selectedImageNames[index]}</span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    <div className="pt-[20px] flex ">
+                        <button
+                            onClick={openModal}
+                            className="bg-[#ef8018] text-white  rounded-full  transition duration-300 w-[300px] h-[30px]"
+                        >
+                            Crop
+                        </button>
+                        <button
+                            onClick={addWatermark}
+                            className="bg-green-500 text-white  rounded-full hover:bg-green-600 transition duration-300 w-[300px] h-[30px]"
+                        >
+                            Add Doctor Image
+                        </button>
+
+                        <button
+                            onClick={handleDownloadClick}
+                            className="bg-[#ef8018] text-white rounded-full  w-[300px] h-[30px]"
+                        >
+                            Download Video
+                        </button>
+                    </div>
+                </div>
+            </div >
+            {/* <CropFun /> */}
+        </>
+    );
+};
+
+export default Multiple;
+
+
+This is my Server side code.......
+const ffmpeg = require('fluent-ffmpeg');
+const fs = require('fs');
+const path = require('path');
+
+
+// //Convert video into mp4 format....
+const videoConvertor = async (req, res) => {
+    try {
+        const { buffer, originalname } = req.file;
+        console.log(req.file);
+
+        // Define the path where the uploaded video will be saved....
+        const uploadDir = path.join('S:/PROGRAMS/Mern_Stack Projects/Internship/winter/Server', 'uploads');
+        const videoFilePath = path.join(uploadDir, originalname);
+        console.log('videoFilePath', videoFilePath);
+
+        // Write the buffer to a file on the server
+        fs.writeFileSync(videoFilePath, buffer);
+
+        // Specify the output file path for the converted video....
+        // const outputFilePath = path.join('S:/PROGRAMS/Mern_Stack Projects/Internship/winter/Server', 'VideoOutput', 'originalname1.mp4');
+        const outputFilePath = path.join('S:/PROGRAMS/Mern_Stack Projects/Internship/winter/Server', 'VideoOutput', originalname.replace(/\.[^/.]+$/, ".mp4"));
+        console.log(outputFilePath);
+
+        // Convert the uploaded video to MP4 using ffmpeg
+        ffmpeg(videoFilePath)
+            .output(outputFilePath)
+            .videoCodec('libx264')
+            .audioCodec('aac')
+            .on('end', async () => {
+                console.log(`Video MP4 Conversion finished....`.bgCyan.white);
+                // Send the converted video file back to the client
+                res.status(200).sendFile(outputFilePath, () => {
+                    // Remove both the uploaded and converted video files
+                    fs.unlinkSync(videoFilePath);
+                    fs.unlinkSync(outputFilePath);
+                });
+            })
+            .on('error', (err) => {
+                console.error('Error:', err);
+                res.status(500).end();
+            })
+            .run();
+    } catch (err) {
+        console.log(err);
+        res.status(501).send({ message: "Data is not sent." });
+    }
+}
